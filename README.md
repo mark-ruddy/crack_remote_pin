@@ -1,7 +1,7 @@
 # Crack Remote Pin
 Rust example of cracking a 4-digit pin on a remote server.  
 
-The cracking HTTP requests are executed asynchronously, so the futures will take some time to build up to 10000 in a vector and then executed at once roughly (there are probably better ways to do this, but I've found this to work well enough for 10k).  
+The cracking HTTP requests are executed asynchronously, so the futures will take some time to build up to 10000 in a vector and then executed at once roughly (there are probably better ways to do this).  
 
 1. Start the pin server
 ```
